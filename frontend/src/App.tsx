@@ -15,11 +15,11 @@ import {
   collection,
   query,
   where,
-  getDocs,
   orderBy,
   updateDoc,
   doc,
   deleteDoc,
+  onSnapshot,
 } from "firebase/firestore";
 import { auth, googleProvider, storage, db } from "./firebase";
 
@@ -91,14 +91,54 @@ function App() {
   }, [darkMode]);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    let unsubscribeCatches: (() => void) | null = null;
+    let unsubscribeCommunity: (() => void) | null = null;
+
+    const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
+
+      // Clean up previous listeners
+      if (unsubscribeCatches) unsubscribeCatches();
+      if (unsubscribeCommunity) unsubscribeCommunity();
+
       if (currentUser) {
-        loadCatches(currentUser.uid);
-        loadCommunityCatches();
+        // Set up real-time listener for user's catches
+        const userCatchesQuery = query(
+          collection(db, "catches"),
+          where("userId", "==", currentUser.uid),
+          orderBy("timestamp", "desc")
+        );
+        unsubscribeCatches = onSnapshot(userCatchesQuery, (snapshot) => {
+          const loadedCatches: FishCatch[] = [];
+          snapshot.forEach((doc) => {
+            loadedCatches.push({ id: doc.id, ...doc.data() } as FishCatch);
+          });
+          setCatches(loadedCatches);
+        });
+
+        // Set up real-time listener for community catches
+        const communityQuery = query(
+          collection(db, "catches"),
+          orderBy("timestamp", "desc")
+        );
+        unsubscribeCommunity = onSnapshot(communityQuery, (snapshot) => {
+          const loadedCatches: FishCatch[] = [];
+          snapshot.forEach((doc) => {
+            loadedCatches.push({ id: doc.id, ...doc.data() } as FishCatch);
+          });
+          setCommunityCatches(loadedCatches);
+        });
+      } else {
+        setCatches([]);
+        setCommunityCatches([]);
       }
     });
-    return () => unsubscribe();
+
+    return () => {
+      unsubscribeAuth();
+      if (unsubscribeCatches) unsubscribeCatches();
+      if (unsubscribeCommunity) unsubscribeCommunity();
+    };
   }, []);
 
   const handleSignIn = async () => {
@@ -112,37 +152,10 @@ function App() {
   const handleSignOut = async () => {
     try {
       await signOut(auth);
-      setCatches([]);
       setShowProfileMenu(false);
     } catch (error) {
       console.error("Error signing out:", error);
     }
-  };
-
-  const loadCatches = async (userId: string) => {
-    const q = query(
-      collection(db, "catches"),
-      where("userId", "==", userId),
-      orderBy("timestamp", "desc")
-    );
-
-    const querySnapshot = await getDocs(q);
-    const loadedCatches: FishCatch[] = [];
-    querySnapshot.forEach((doc) => {
-      loadedCatches.push({ id: doc.id, ...doc.data() } as FishCatch);
-    });
-    setCatches(loadedCatches);
-  };
-
-  const loadCommunityCatches = async () => {
-    const q = query(collection(db, "catches"), orderBy("timestamp", "desc"));
-
-    const querySnapshot = await getDocs(q);
-    const loadedCatches: FishCatch[] = [];
-    querySnapshot.forEach((doc) => {
-      loadedCatches.push({ id: doc.id, ...doc.data() } as FishCatch);
-    });
-    setCommunityCatches(loadedCatches);
   };
 
   const isOwnCatch = (catch_: FishCatch) => {
@@ -207,9 +220,7 @@ function App() {
 
       const result = await response.json();
 
-      await loadCatches(user.uid);
-      await loadCommunityCatches();
-
+      // Real-time listeners will automatically update the catches
       setSelectedFile(null);
       setPreviewUrl(null);
       setCatchDetails({ location: "", method: "", notes: "" });
@@ -249,6 +260,7 @@ function App() {
         "identification.scientificName": editedDetails.scientificName,
       });
 
+      // Update selectedCatch for immediate modal feedback
       const updatedCatch = {
         ...selectedCatch,
         catchDetails: {
@@ -264,9 +276,7 @@ function App() {
         },
       };
       setSelectedCatch(updatedCatch);
-      setCatches(
-        catches.map((c) => (c.id === selectedCatch.id ? updatedCatch : c))
-      );
+      // Real-time listener will automatically update the catches list
       setIsEditing(false);
 
       alert("Catch details updated successfully!");
@@ -316,10 +326,7 @@ function App() {
       const catchRef = doc(db, "catches", selectedCatch.id);
       await deleteDoc(catchRef);
 
-      // 3. UPDATE UI STATE
-      setCatches((prevCatches) =>
-        prevCatches.filter((c) => c.id !== selectedCatch.id)
-      );
+      // 3. Close modal - real-time listener will update the list
       setSelectedCatch(null);
       setIsEditing(false);
 
