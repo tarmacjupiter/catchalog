@@ -78,6 +78,8 @@ function App() {
     "my-catches"
   );
   const [communityCatches, setCommunityCatches] = useState<FishCatch[]>([]);
+  const [fullPhotoUrl, setFullPhotoUrl] = useState<string | null>(null);
+  const [selectedUserFilter, setSelectedUserFilter] = useState<string>("all");
 
   useEffect(() => {
     localStorage.setItem("darkMode", JSON.stringify(darkMode));
@@ -146,6 +148,19 @@ function App() {
   const isOwnCatch = (catch_: FishCatch) => {
     return user && catch_.userId === user.uid;
   };
+
+  // Get unique users from community catches for filter
+  const uniqueUsers = communityCatches.reduce((acc, catch_) => {
+    if (catch_.userId && catch_.userDisplayName && !acc.find(u => u.userId === catch_.userId)) {
+      acc.push({ userId: catch_.userId, displayName: catch_.userDisplayName });
+    }
+    return acc;
+  }, [] as { userId: string; displayName: string }[]);
+
+  // Filter community catches by selected user
+  const filteredCommunityCatches = selectedUserFilter === "all"
+    ? communityCatches
+    : communityCatches.filter(c => c.userId === selectedUserFilter);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -587,26 +602,57 @@ function App() {
                 <p className="text-gray-500 dark:text-gray-400 mt-1">
                   {activeTab === "my-catches"
                     ? `${catches.length} fish logged`
-                    : `${communityCatches.length} catches from the community`}
+                    : `${filteredCommunityCatches.length} catches${selectedUserFilter !== "all" ? " (filtered)" : ""}`}
                 </p>
               </div>
             </div>
 
-            {(activeTab === "my-catches" ? catches : communityCatches).length === 0 ? (
+            {/* User Filter - Community tab only */}
+            {activeTab === "community" && uniqueUsers.length > 0 && (
+              <div className="mb-6">
+                <div className="flex items-center gap-3">
+                  <label className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                    Filter by angler:
+                  </label>
+                  <select
+                    value={selectedUserFilter}
+                    onChange={(e) => setSelectedUserFilter(e.target.value)}
+                    className="px-4 py-2 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-600 rounded-xl text-gray-700 dark:text-gray-300 focus:ring-2 focus:ring-blue-500 dark:focus:ring-cyan-400 focus:border-transparent transition-all"
+                  >
+                    <option value="all">All Anglers</option>
+                    {uniqueUsers.map((u) => (
+                      <option key={u.userId} value={u.userId}>
+                        {u.displayName}
+                      </option>
+                    ))}
+                  </select>
+                  {selectedUserFilter !== "all" && (
+                    <button
+                      onClick={() => setSelectedUserFilter("all")}
+                      className="text-sm text-blue-500 dark:text-cyan-400 hover:underline"
+                    >
+                      Clear filter
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {(activeTab === "my-catches" ? catches : filteredCommunityCatches).length === 0 ? (
               <div className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm rounded-3xl p-16 text-center border-2 border-dashed border-gray-200 dark:border-slate-600">
                 <div className="text-7xl mb-4">🐟</div>
                 <p className="text-gray-600 dark:text-gray-300 text-xl font-semibold mb-2">
-                  {activeTab === "my-catches" ? "No catches yet" : "No community catches yet"}
+                  {activeTab === "my-catches" ? "No catches yet" : selectedUserFilter !== "all" ? "No catches from this angler" : "No community catches yet"}
                 </p>
                 <p className="text-gray-400 dark:text-gray-500">
                   {activeTab === "my-catches"
                     ? "Upload your first fish photo to get started!"
-                    : "Be the first to share a catch!"}
+                    : selectedUserFilter !== "all" ? "Try selecting a different angler or clear the filter." : "Be the first to share a catch!"}
                 </p>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {(activeTab === "my-catches" ? catches : communityCatches).map((catch_) => (
+                {(activeTab === "my-catches" ? catches : filteredCommunityCatches).map((catch_) => (
                   <div
                     key={catch_.id}
                     onClick={() => {
@@ -645,7 +691,14 @@ function App() {
 
                       {/* User Info - Show in Community tab */}
                       {activeTab === "community" && catch_.userDisplayName && (
-                        <div className="flex items-center gap-2 mb-4 pb-3 border-b border-gray-100 dark:border-slate-700">
+                        <div
+                          className="flex items-center gap-2 mb-4 pb-3 border-b border-gray-100 dark:border-slate-700 cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-700 -mx-2 px-2 py-1 rounded-lg transition-colors"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (catch_.userId) setSelectedUserFilter(catch_.userId);
+                          }}
+                          title={`Filter by ${catch_.userDisplayName}`}
+                        >
                           {catch_.userPhotoURL ? (
                             <img
                               src={catch_.userPhotoURL}
@@ -657,7 +710,7 @@ function App() {
                               {catch_.userDisplayName.charAt(0).toUpperCase()}
                             </div>
                           )}
-                          <span className="text-sm text-gray-600 dark:text-gray-400 font-medium">
+                          <span className="text-sm text-gray-600 dark:text-gray-400 font-medium hover:text-blue-500 dark:hover:text-cyan-400">
                             {catch_.userDisplayName}
                             {isOwnCatch(catch_) && (
                               <span className="ml-1 text-xs text-blue-500 dark:text-cyan-400">
@@ -773,13 +826,22 @@ function App() {
               )}
             </div>
 
-            {/* Image */}
-            <div className="relative h-80 bg-gradient-to-br from-blue-100 to-cyan-100 dark:from-slate-700 dark:to-slate-600">
+            {/* Image - Clickable for full view */}
+            <div
+              className="relative h-80 bg-gradient-to-br from-blue-100 to-cyan-100 dark:from-slate-700 dark:to-slate-600 cursor-pointer group"
+              onClick={() => setFullPhotoUrl(selectedCatch.imageUrl)}
+            >
               <img
                 src={selectedCatch.imageUrl}
                 alt={selectedCatch.identification.commonName}
                 className="w-full h-full object-cover"
               />
+              {/* Click hint overlay */}
+              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all flex items-center justify-center">
+                <span className="text-white text-lg font-semibold opacity-0 group-hover:opacity-100 transition-opacity bg-black/50 px-4 py-2 rounded-full">
+                  Click to view full photo
+                </span>
+              </div>
               <div className="absolute top-4 left-4">
                 <span
                   className={`px-4 py-2 rounded-full text-sm font-bold shadow-lg ${
@@ -1062,6 +1124,27 @@ function App() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Full Photo Modal */}
+      {fullPhotoUrl && (
+        <div
+          className="fixed inset-0 bg-black/90 z-[60] flex items-center justify-center p-4"
+          onClick={() => setFullPhotoUrl(null)}
+        >
+          <button
+            onClick={() => setFullPhotoUrl(null)}
+            className="absolute top-4 right-4 w-12 h-12 bg-white/20 hover:bg-white/30 text-white rounded-full flex items-center justify-center text-2xl transition-colors z-10"
+          >
+            ✕
+          </button>
+          <img
+            src={fullPhotoUrl}
+            alt="Full size"
+            className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
         </div>
       )}
     </div>

@@ -33,6 +33,17 @@ export const identifyFish = functions
           return;
         }
 
+        // Fetch user info from Firebase Auth
+        let userDisplayName = "Anonymous";
+        let userPhotoURL: string | null = null;
+        try {
+          const userRecord = await admin.auth().getUser(userId);
+          userDisplayName = userRecord.displayName || "Anonymous";
+          userPhotoURL = userRecord.photoURL || null;
+        } catch (authError) {
+          console.warn("Could not fetch user info:", authError);
+        }
+
         const apiKey = process.env.ANTHROPIC_API_KEY;
         const anthropic = new Anthropic({ apiKey });
 
@@ -109,6 +120,8 @@ export const identifyFish = functions
         // Store metadata in Firestore linked to the original 20MB image URL
         const catchDoc = await db.collection("catches").add({
           userId,
+          userDisplayName: userDisplayName || "Anonymous",
+          userPhotoURL: userPhotoURL || null,
           imageUrl: imageDownloadUrl,
           identification,
           catchDetails,
@@ -126,6 +139,57 @@ export const identifyFish = functions
           error: "Failed to identify fish",
           details: error instanceof Error ? error.message : "Unknown error",
         });
+      }
+    });
+  });
+
+// One-time backfill function to add user info to existing catches
+export const backfillUserInfo = functions
+  .runWith({
+    timeoutSeconds: 540,
+    memory: "512MB",
+  })
+  .https.onRequest(async (req, res) => {
+    corsHandler(req, res, async () => {
+      try {
+        const catchesSnapshot = await db.collection("catches").get();
+        let updated = 0;
+        let skipped = 0;
+
+        for (const doc of catchesSnapshot.docs) {
+          const data = doc.data();
+
+          // Skip if already has user info
+          if (data.userDisplayName && data.userDisplayName !== "Anonymous") {
+            skipped++;
+            continue;
+          }
+
+          // Fetch user info from Firebase Auth
+          if (data.userId) {
+            try {
+              const userRecord = await admin.auth().getUser(data.userId);
+              await doc.ref.update({
+                userDisplayName: userRecord.displayName || "Anonymous",
+                userPhotoURL: userRecord.photoURL || null,
+              });
+              updated++;
+            } catch (authError) {
+              console.warn(`Could not fetch user ${data.userId}:`, authError);
+              skipped++;
+            }
+          }
+        }
+
+        res.json({
+          message: "Backfill complete",
+          updated,
+          skipped,
+          total: catchesSnapshot.size
+        });
+      } catch (error) {
+        console.error("Backfill error:", error);
+        res.status(500).json({ error: "Backfill failed" });
       }
     });
   });
