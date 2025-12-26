@@ -63,14 +63,8 @@ export const identifyFish = functions
 
         const base64Image = resizedBuffer.toString("base64");
 
-        // Determine media type based on original path
-        let mediaType: "image/jpeg" | "image/png" | "image/webp" | "image/gif" =
-          "image/jpeg";
-        if (imageUrl.toLowerCase().endsWith(".png")) mediaType = "image/png";
-        else if (imageUrl.toLowerCase().endsWith(".webp"))
-          mediaType = "image/webp";
-        else if (imageUrl.toLowerCase().endsWith(".gif"))
-          mediaType = "image/gif";
+        // Always JPEG after sharp conversion above
+        const mediaType = "image/jpeg" as const;
 
         // Call Claude with the resized version
         const message = await anthropic.messages.create({
