@@ -25,6 +25,9 @@ import { auth, googleProvider, storage, db } from "./firebase";
 
 interface FishCatch {
   id: string;
+  userId?: string;
+  userDisplayName?: string;
+  userPhotoURL?: string;
   imageUrl: string;
   storagePath?: string; // Add this to track the storage path
   identification: {
@@ -71,6 +74,10 @@ function App() {
     const saved = localStorage.getItem("darkMode");
     return saved ? JSON.parse(saved) : false;
   });
+  const [activeTab, setActiveTab] = useState<"my-catches" | "community">(
+    "my-catches"
+  );
+  const [communityCatches, setCommunityCatches] = useState<FishCatch[]>([]);
 
   useEffect(() => {
     localStorage.setItem("darkMode", JSON.stringify(darkMode));
@@ -86,6 +93,7 @@ function App() {
       setUser(currentUser);
       if (currentUser) {
         loadCatches(currentUser.uid);
+        loadCommunityCatches();
       }
     });
     return () => unsubscribe();
@@ -122,6 +130,21 @@ function App() {
       loadedCatches.push({ id: doc.id, ...doc.data() } as FishCatch);
     });
     setCatches(loadedCatches);
+  };
+
+  const loadCommunityCatches = async () => {
+    const q = query(collection(db, "catches"), orderBy("timestamp", "desc"));
+
+    const querySnapshot = await getDocs(q);
+    const loadedCatches: FishCatch[] = [];
+    querySnapshot.forEach((doc) => {
+      loadedCatches.push({ id: doc.id, ...doc.data() } as FishCatch);
+    });
+    setCommunityCatches(loadedCatches);
+  };
+
+  const isOwnCatch = (catch_: FishCatch) => {
+    return user && catch_.userId === user.uid;
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -170,6 +193,7 @@ function App() {
       const result = await response.json();
 
       await loadCatches(user.uid);
+      await loadCommunityCatches();
 
       setSelectedFile(null);
       setPreviewUrl(null);
@@ -532,31 +556,57 @@ function App() {
 
           {/* Right Side - Gallery */}
           <div className="lg:col-span-2">
-            <div className="mb-6 flex items-center justify-between">
+            {/* Tab Navigation */}
+            <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setActiveTab("my-catches")}
+                  className={`px-6 py-3 rounded-full font-semibold transition-all ${
+                    activeTab === "my-catches"
+                      ? "bg-gradient-to-r from-blue-600 to-cyan-500 text-white shadow-lg"
+                      : "bg-white dark:bg-slate-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 border border-gray-200 dark:border-slate-600"
+                  }`}
+                >
+                  My Catches
+                </button>
+                <button
+                  onClick={() => setActiveTab("community")}
+                  className={`px-6 py-3 rounded-full font-semibold transition-all ${
+                    activeTab === "community"
+                      ? "bg-gradient-to-r from-blue-600 to-cyan-500 text-white shadow-lg"
+                      : "bg-white dark:bg-slate-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 border border-gray-200 dark:border-slate-600"
+                  }`}
+                >
+                  Community
+                </button>
+              </div>
               <div>
-                <h2 className="text-3xl font-bold text-gray-800 dark:text-white">
-                  Your Catches
+                <h2 className="text-2xl font-bold text-gray-800 dark:text-white">
+                  {activeTab === "my-catches" ? "Your Catches" : "Community Catches"}
                 </h2>
                 <p className="text-gray-500 dark:text-gray-400 mt-1">
-                  {catches.length} {catches.length === 1 ? "fish" : "fish"}{" "}
-                  logged
+                  {activeTab === "my-catches"
+                    ? `${catches.length} fish logged`
+                    : `${communityCatches.length} catches from the community`}
                 </p>
               </div>
             </div>
 
-            {catches.length === 0 ? (
+            {(activeTab === "my-catches" ? catches : communityCatches).length === 0 ? (
               <div className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm rounded-3xl p-16 text-center border-2 border-dashed border-gray-200 dark:border-slate-600">
                 <div className="text-7xl mb-4">🐟</div>
                 <p className="text-gray-600 dark:text-gray-300 text-xl font-semibold mb-2">
-                  No catches yet
+                  {activeTab === "my-catches" ? "No catches yet" : "No community catches yet"}
                 </p>
                 <p className="text-gray-400 dark:text-gray-500">
-                  Upload your first fish photo to get started!
+                  {activeTab === "my-catches"
+                    ? "Upload your first fish photo to get started!"
+                    : "Be the first to share a catch!"}
                 </p>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {catches.map((catch_) => (
+                {(activeTab === "my-catches" ? catches : communityCatches).map((catch_) => (
                   <div
                     key={catch_.id}
                     onClick={() => {
@@ -589,9 +639,34 @@ function App() {
                       <h3 className="font-bold text-2xl text-gray-900 dark:text-white mb-1">
                         {catch_.identification.commonName}
                       </h3>
-                      <p className="text-sm text-gray-500 dark:text-gray-400 italic mb-4">
+                      <p className="text-sm text-gray-500 dark:text-gray-400 italic mb-3">
                         {catch_.identification.scientificName}
                       </p>
+
+                      {/* User Info - Show in Community tab */}
+                      {activeTab === "community" && catch_.userDisplayName && (
+                        <div className="flex items-center gap-2 mb-4 pb-3 border-b border-gray-100 dark:border-slate-700">
+                          {catch_.userPhotoURL ? (
+                            <img
+                              src={catch_.userPhotoURL}
+                              alt={catch_.userDisplayName}
+                              className="w-8 h-8 rounded-full object-cover border-2 border-blue-300 dark:border-cyan-500"
+                            />
+                          ) : (
+                            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-cyan-400 flex items-center justify-center text-white text-sm font-bold">
+                              {catch_.userDisplayName.charAt(0).toUpperCase()}
+                            </div>
+                          )}
+                          <span className="text-sm text-gray-600 dark:text-gray-400 font-medium">
+                            {catch_.userDisplayName}
+                            {isOwnCatch(catch_) && (
+                              <span className="ml-1 text-xs text-blue-500 dark:text-cyan-400">
+                                (You)
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                      )}
 
                       <div className="space-y-2.5 text-sm">
                         {catch_.catchDetails.location && (
@@ -650,20 +725,25 @@ function App() {
             <div className="absolute top-4 right-4 flex gap-2 z-10">
               {!isEditing ? (
                 <>
-                  <button
-                    onClick={handleEditCatch}
-                    className="w-10 h-10 bg-blue-500 hover:bg-blue-600 text-white rounded-full flex items-center justify-center shadow-lg transition-colors"
-                    title="Edit catch"
-                  >
-                    ✏️
-                  </button>
-                  <button
-                    onClick={handleDeleteCatch}
-                    className="w-10 h-10 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center shadow-lg transition-colors"
-                    title="Delete catch"
-                  >
-                    🗑️
-                  </button>
+                  {/* Only show Edit/Delete if user owns this catch */}
+                  {isOwnCatch(selectedCatch) && (
+                    <>
+                      <button
+                        onClick={handleEditCatch}
+                        className="w-10 h-10 bg-blue-500 hover:bg-blue-600 text-white rounded-full flex items-center justify-center shadow-lg transition-colors"
+                        title="Edit catch"
+                      >
+                        ✏️
+                      </button>
+                      <button
+                        onClick={handleDeleteCatch}
+                        className="w-10 h-10 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center shadow-lg transition-colors"
+                        title="Delete catch"
+                      >
+                        🗑️
+                      </button>
+                    </>
+                  )}
                   <button
                     onClick={() => {
                       setSelectedCatch(null);
@@ -769,6 +849,36 @@ function App() {
                       <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                         Family: {selectedCatch.identification.family}
                       </p>
+                    )}
+
+                    {/* User Info in Modal */}
+                    {selectedCatch.userDisplayName && (
+                      <div className="flex items-center gap-3 mt-4 p-3 bg-gray-50 dark:bg-slate-700 rounded-xl">
+                        {selectedCatch.userPhotoURL ? (
+                          <img
+                            src={selectedCatch.userPhotoURL}
+                            alt={selectedCatch.userDisplayName}
+                            className="w-10 h-10 rounded-full object-cover border-2 border-blue-300 dark:border-cyan-500"
+                          />
+                        ) : (
+                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-cyan-400 flex items-center justify-center text-white font-bold">
+                            {selectedCatch.userDisplayName.charAt(0).toUpperCase()}
+                          </div>
+                        )}
+                        <div>
+                          <span className="text-sm text-gray-500 dark:text-gray-400">
+                            Caught by
+                          </span>
+                          <p className="font-semibold text-gray-800 dark:text-white">
+                            {selectedCatch.userDisplayName}
+                            {isOwnCatch(selectedCatch) && (
+                              <span className="ml-2 text-xs text-blue-500 dark:text-cyan-400">
+                                (You)
+                              </span>
+                            )}
+                          </p>
+                        </div>
+                      </div>
                     )}
                   </>
                 )}
