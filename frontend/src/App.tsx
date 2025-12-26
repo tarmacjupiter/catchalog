@@ -15,16 +15,19 @@ import {
   collection,
   query,
   where,
-  getDocs,
   orderBy,
   updateDoc,
   doc,
   deleteDoc,
+  onSnapshot,
 } from "firebase/firestore";
 import { auth, googleProvider, storage, db } from "./firebase";
 
 interface FishCatch {
   id: string;
+  userId?: string;
+  userDisplayName?: string;
+  userPhotoURL?: string;
   imageUrl: string;
   storagePath?: string; // Add this to track the storage path
   identification: {
@@ -71,6 +74,12 @@ function App() {
     const saved = localStorage.getItem("darkMode");
     return saved ? JSON.parse(saved) : false;
   });
+  const [activeTab, setActiveTab] = useState<"my-catches" | "community">(
+    "my-catches"
+  );
+  const [communityCatches, setCommunityCatches] = useState<FishCatch[]>([]);
+  const [fullPhotoUrl, setFullPhotoUrl] = useState<string | null>(null);
+  const [selectedUserFilter, setSelectedUserFilter] = useState<string>("all");
 
   useEffect(() => {
     localStorage.setItem("darkMode", JSON.stringify(darkMode));
@@ -82,13 +91,54 @@ function App() {
   }, [darkMode]);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    let unsubscribeCatches: (() => void) | null = null;
+    let unsubscribeCommunity: (() => void) | null = null;
+
+    const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
+
+      // Clean up previous listeners
+      if (unsubscribeCatches) unsubscribeCatches();
+      if (unsubscribeCommunity) unsubscribeCommunity();
+
       if (currentUser) {
-        loadCatches(currentUser.uid);
+        // Set up real-time listener for user's catches
+        const userCatchesQuery = query(
+          collection(db, "catches"),
+          where("userId", "==", currentUser.uid),
+          orderBy("timestamp", "desc")
+        );
+        unsubscribeCatches = onSnapshot(userCatchesQuery, (snapshot) => {
+          const loadedCatches: FishCatch[] = [];
+          snapshot.forEach((doc) => {
+            loadedCatches.push({ id: doc.id, ...doc.data() } as FishCatch);
+          });
+          setCatches(loadedCatches);
+        });
+
+        // Set up real-time listener for community catches
+        const communityQuery = query(
+          collection(db, "catches"),
+          orderBy("timestamp", "desc")
+        );
+        unsubscribeCommunity = onSnapshot(communityQuery, (snapshot) => {
+          const loadedCatches: FishCatch[] = [];
+          snapshot.forEach((doc) => {
+            loadedCatches.push({ id: doc.id, ...doc.data() } as FishCatch);
+          });
+          setCommunityCatches(loadedCatches);
+        });
+      } else {
+        setCatches([]);
+        setCommunityCatches([]);
       }
     });
-    return () => unsubscribe();
+
+    return () => {
+      unsubscribeAuth();
+      if (unsubscribeCatches) unsubscribeCatches();
+      if (unsubscribeCommunity) unsubscribeCommunity();
+    };
   }, []);
 
   const handleSignIn = async () => {
@@ -102,27 +152,33 @@ function App() {
   const handleSignOut = async () => {
     try {
       await signOut(auth);
-      setCatches([]);
       setShowProfileMenu(false);
     } catch (error) {
       console.error("Error signing out:", error);
     }
   };
 
-  const loadCatches = async (userId: string) => {
-    const q = query(
-      collection(db, "catches"),
-      where("userId", "==", userId),
-      orderBy("timestamp", "desc")
-    );
-
-    const querySnapshot = await getDocs(q);
-    const loadedCatches: FishCatch[] = [];
-    querySnapshot.forEach((doc) => {
-      loadedCatches.push({ id: doc.id, ...doc.data() } as FishCatch);
-    });
-    setCatches(loadedCatches);
+  const isOwnCatch = (catch_: FishCatch) => {
+    return user && catch_.userId === user.uid;
   };
+
+  // Get unique users from community catches for filter
+  const uniqueUsers = communityCatches.reduce((acc, catch_) => {
+    if (
+      catch_.userId &&
+      catch_.userDisplayName &&
+      !acc.find((u) => u.userId === catch_.userId)
+    ) {
+      acc.push({ userId: catch_.userId, displayName: catch_.userDisplayName });
+    }
+    return acc;
+  }, [] as { userId: string; displayName: string }[]);
+
+  // Filter community catches by selected user
+  const filteredCommunityCatches =
+    selectedUserFilter === "all"
+      ? communityCatches
+      : communityCatches.filter((c) => c.userId === selectedUserFilter);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -169,8 +225,7 @@ function App() {
 
       const result = await response.json();
 
-      await loadCatches(user.uid);
-
+      // Real-time listeners will automatically update the catches
       setSelectedFile(null);
       setPreviewUrl(null);
       setCatchDetails({ location: "", method: "", notes: "" });
@@ -210,6 +265,7 @@ function App() {
         "identification.scientificName": editedDetails.scientificName,
       });
 
+      // Update selectedCatch for immediate modal feedback
       const updatedCatch = {
         ...selectedCatch,
         catchDetails: {
@@ -225,9 +281,7 @@ function App() {
         },
       };
       setSelectedCatch(updatedCatch);
-      setCatches(
-        catches.map((c) => (c.id === selectedCatch.id ? updatedCatch : c))
-      );
+      // Real-time listener will automatically update the catches list
       setIsEditing(false);
 
       alert("Catch details updated successfully!");
@@ -277,10 +331,7 @@ function App() {
       const catchRef = doc(db, "catches", selectedCatch.id);
       await deleteDoc(catchRef);
 
-      // 3. UPDATE UI STATE
-      setCatches((prevCatches) =>
-        prevCatches.filter((c) => c.id !== selectedCatch.id)
-      );
+      // 3. Close modal - real-time listener will update the list
       setSelectedCatch(null);
       setIsEditing(false);
 
@@ -308,7 +359,7 @@ function App() {
             <div className="text-8xl drop-shadow-2xl">🎣</div>
           </div>
           <h1 className="text-7xl font-black text-white mb-4 drop-shadow-lg">
-            Fishidy
+            Catchalog
           </h1>
           <p className="text-2xl text-white/90 mb-12 font-light">
             AI-Powered Fishing Diary
@@ -332,7 +383,7 @@ function App() {
           <div className="flex items-center gap-3">
             <span className="text-4xl">🎣</span>
             <h1 className="text-3xl font-black bg-gradient-to-r from-blue-600 to-cyan-500 dark:from-cyan-400 dark:to-blue-400 bg-clip-text text-transparent">
-              Fishidy
+              Catchalog
             </h1>
           </div>
 
@@ -532,31 +583,102 @@ function App() {
 
           {/* Right Side - Gallery */}
           <div className="lg:col-span-2">
-            <div className="mb-6 flex items-center justify-between">
+            {/* Tab Navigation */}
+            <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setActiveTab("my-catches")}
+                  className={`px-6 py-3 rounded-full font-semibold transition-all ${
+                    activeTab === "my-catches"
+                      ? "bg-gradient-to-r from-blue-600 to-cyan-500 text-white shadow-lg"
+                      : "bg-white dark:bg-slate-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 border border-gray-200 dark:border-slate-600"
+                  }`}
+                >
+                  My Catches
+                </button>
+                <button
+                  onClick={() => setActiveTab("community")}
+                  className={`px-6 py-3 rounded-full font-semibold transition-all ${
+                    activeTab === "community"
+                      ? "bg-gradient-to-r from-blue-600 to-cyan-500 text-white shadow-lg"
+                      : "bg-white dark:bg-slate-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 border border-gray-200 dark:border-slate-600"
+                  }`}
+                >
+                  Community
+                </button>
+              </div>
               <div>
-                <h2 className="text-3xl font-bold text-gray-800 dark:text-white">
-                  Your Catches
+                <h2 className="text-2xl font-bold text-gray-800 dark:text-white">
+                  {activeTab === "my-catches"
+                    ? "Your Catches"
+                    : "Community Catches"}
                 </h2>
                 <p className="text-gray-500 dark:text-gray-400 mt-1">
-                  {catches.length} {catches.length === 1 ? "fish" : "fish"}{" "}
-                  logged
+                  {activeTab === "my-catches"
+                    ? `${catches.length} fish logged`
+                    : `${filteredCommunityCatches.length} catches${
+                        selectedUserFilter !== "all" ? " (filtered)" : ""
+                      }`}
                 </p>
               </div>
             </div>
 
-            {catches.length === 0 ? (
+            {/* User Filter - Community tab only */}
+            {activeTab === "community" && uniqueUsers.length > 0 && (
+              <div className="mb-6">
+                <div className="flex items-center gap-3">
+                  <label className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                    Filter by angler:
+                  </label>
+                  <select
+                    value={selectedUserFilter}
+                    onChange={(e) => setSelectedUserFilter(e.target.value)}
+                    className="px-4 py-2 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-600 rounded-xl text-gray-700 dark:text-gray-300 focus:ring-2 focus:ring-blue-500 dark:focus:ring-cyan-400 focus:border-transparent transition-all"
+                  >
+                    <option value="all">All Anglers</option>
+                    {uniqueUsers.map((u) => (
+                      <option key={u.userId} value={u.userId}>
+                        {u.displayName}
+                      </option>
+                    ))}
+                  </select>
+                  {selectedUserFilter !== "all" && (
+                    <button
+                      onClick={() => setSelectedUserFilter("all")}
+                      className="text-sm text-blue-500 dark:text-cyan-400 hover:underline"
+                    >
+                      Clear filter
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {(activeTab === "my-catches" ? catches : filteredCommunityCatches)
+              .length === 0 ? (
               <div className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm rounded-3xl p-16 text-center border-2 border-dashed border-gray-200 dark:border-slate-600">
                 <div className="text-7xl mb-4">🐟</div>
                 <p className="text-gray-600 dark:text-gray-300 text-xl font-semibold mb-2">
-                  No catches yet
+                  {activeTab === "my-catches"
+                    ? "No catches yet"
+                    : selectedUserFilter !== "all"
+                    ? "No catches from this angler"
+                    : "No community catches yet"}
                 </p>
                 <p className="text-gray-400 dark:text-gray-500">
-                  Upload your first fish photo to get started!
+                  {activeTab === "my-catches"
+                    ? "Upload your first fish photo to get started!"
+                    : selectedUserFilter !== "all"
+                    ? "Try selecting a different angler or clear the filter."
+                    : "Be the first to share a catch!"}
                 </p>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {catches.map((catch_) => (
+                {(activeTab === "my-catches"
+                  ? catches
+                  : filteredCommunityCatches
+                ).map((catch_) => (
                   <div
                     key={catch_.id}
                     onClick={() => {
@@ -589,9 +711,42 @@ function App() {
                       <h3 className="font-bold text-2xl text-gray-900 dark:text-white mb-1">
                         {catch_.identification.commonName}
                       </h3>
-                      <p className="text-sm text-gray-500 dark:text-gray-400 italic mb-4">
+                      <p className="text-sm text-gray-500 dark:text-gray-400 italic mb-3">
                         {catch_.identification.scientificName}
                       </p>
+
+                      {/* User Info - Show in Community tab */}
+                      {activeTab === "community" && catch_.userDisplayName && (
+                        <div
+                          className="flex items-center gap-2 mb-4 pb-3 border-b border-gray-100 dark:border-slate-700 cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-700 -mx-2 px-2 py-1 rounded-lg transition-colors"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (catch_.userId)
+                              setSelectedUserFilter(catch_.userId);
+                          }}
+                          title={`Filter by ${catch_.userDisplayName}`}
+                        >
+                          {catch_.userPhotoURL ? (
+                            <img
+                              src={catch_.userPhotoURL}
+                              alt={catch_.userDisplayName}
+                              className="w-8 h-8 rounded-full object-cover border-2 border-blue-300 dark:border-cyan-500"
+                            />
+                          ) : (
+                            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-cyan-400 flex items-center justify-center text-white text-sm font-bold">
+                              {catch_.userDisplayName.charAt(0).toUpperCase()}
+                            </div>
+                          )}
+                          <span className="text-sm text-gray-600 dark:text-gray-400 font-medium hover:text-blue-500 dark:hover:text-cyan-400">
+                            {catch_.userDisplayName}
+                            {isOwnCatch(catch_) && (
+                              <span className="ml-1 text-xs text-blue-500 dark:text-cyan-400">
+                                (You)
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                      )}
 
                       <div className="space-y-2.5 text-sm">
                         {catch_.catchDetails.location && (
@@ -650,20 +805,25 @@ function App() {
             <div className="absolute top-4 right-4 flex gap-2 z-10">
               {!isEditing ? (
                 <>
-                  <button
-                    onClick={handleEditCatch}
-                    className="w-10 h-10 bg-blue-500 hover:bg-blue-600 text-white rounded-full flex items-center justify-center shadow-lg transition-colors"
-                    title="Edit catch"
-                  >
-                    ✏️
-                  </button>
-                  <button
-                    onClick={handleDeleteCatch}
-                    className="w-10 h-10 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center shadow-lg transition-colors"
-                    title="Delete catch"
-                  >
-                    🗑️
-                  </button>
+                  {/* Only show Edit/Delete if user owns this catch */}
+                  {isOwnCatch(selectedCatch) && (
+                    <>
+                      <button
+                        onClick={handleEditCatch}
+                        className="w-10 h-10 bg-blue-500 hover:bg-blue-600 text-white rounded-full flex items-center justify-center shadow-lg transition-colors"
+                        title="Edit catch"
+                      >
+                        ✏️
+                      </button>
+                      <button
+                        onClick={handleDeleteCatch}
+                        className="w-10 h-10 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center shadow-lg transition-colors"
+                        title="Delete catch"
+                      >
+                        🗑️
+                      </button>
+                    </>
+                  )}
                   <button
                     onClick={() => {
                       setSelectedCatch(null);
@@ -693,13 +853,22 @@ function App() {
               )}
             </div>
 
-            {/* Image */}
-            <div className="relative h-80 bg-gradient-to-br from-blue-100 to-cyan-100 dark:from-slate-700 dark:to-slate-600">
+            {/* Image - Clickable for full view */}
+            <div
+              className="relative h-80 bg-gradient-to-br from-blue-100 to-cyan-100 dark:from-slate-700 dark:to-slate-600 cursor-pointer group"
+              onClick={() => setFullPhotoUrl(selectedCatch.imageUrl)}
+            >
               <img
                 src={selectedCatch.imageUrl}
                 alt={selectedCatch.identification.commonName}
                 className="w-full h-full object-cover"
               />
+              {/* Click hint overlay */}
+              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all flex items-center justify-center">
+                <span className="text-white text-lg font-semibold opacity-0 group-hover:opacity-100 transition-opacity bg-black/50 px-4 py-2 rounded-full">
+                  Click to view full photo
+                </span>
+              </div>
               <div className="absolute top-4 left-4">
                 <span
                   className={`px-4 py-2 rounded-full text-sm font-bold shadow-lg ${
@@ -769,6 +938,38 @@ function App() {
                       <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                         Family: {selectedCatch.identification.family}
                       </p>
+                    )}
+
+                    {/* User Info in Modal */}
+                    {selectedCatch.userDisplayName && (
+                      <div className="flex items-center gap-3 mt-4 p-3 bg-gray-50 dark:bg-slate-700 rounded-xl">
+                        {selectedCatch.userPhotoURL ? (
+                          <img
+                            src={selectedCatch.userPhotoURL}
+                            alt={selectedCatch.userDisplayName}
+                            className="w-10 h-10 rounded-full object-cover border-2 border-blue-300 dark:border-cyan-500"
+                          />
+                        ) : (
+                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-cyan-400 flex items-center justify-center text-white font-bold">
+                            {selectedCatch.userDisplayName
+                              .charAt(0)
+                              .toUpperCase()}
+                          </div>
+                        )}
+                        <div>
+                          <span className="text-sm text-gray-500 dark:text-gray-400">
+                            Caught by
+                          </span>
+                          <p className="font-semibold text-gray-800 dark:text-white">
+                            {selectedCatch.userDisplayName}
+                            {isOwnCatch(selectedCatch) && (
+                              <span className="ml-2 text-xs text-blue-500 dark:text-cyan-400">
+                                (You)
+                              </span>
+                            )}
+                          </p>
+                        </div>
+                      </div>
                     )}
                   </>
                 )}
@@ -952,6 +1153,27 @@ function App() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Full Photo Modal */}
+      {fullPhotoUrl && (
+        <div
+          className="fixed inset-0 bg-black/90 z-[60] flex items-center justify-center p-4"
+          onClick={() => setFullPhotoUrl(null)}
+        >
+          <button
+            onClick={() => setFullPhotoUrl(null)}
+            className="absolute top-4 right-4 w-12 h-12 bg-white/20 hover:bg-white/30 text-white rounded-full flex items-center justify-center text-2xl transition-colors z-10"
+          >
+            ✕
+          </button>
+          <img
+            src={fullPhotoUrl}
+            alt="Full size"
+            className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
         </div>
       )}
     </div>
