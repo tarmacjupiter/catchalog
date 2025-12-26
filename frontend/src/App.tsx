@@ -164,16 +164,21 @@ function App() {
 
   // Get unique users from community catches for filter
   const uniqueUsers = communityCatches.reduce((acc, catch_) => {
-    if (catch_.userId && catch_.userDisplayName && !acc.find(u => u.userId === catch_.userId)) {
+    if (
+      catch_.userId &&
+      catch_.userDisplayName &&
+      !acc.find((u) => u.userId === catch_.userId)
+    ) {
       acc.push({ userId: catch_.userId, displayName: catch_.userDisplayName });
     }
     return acc;
   }, [] as { userId: string; displayName: string }[]);
 
   // Filter community catches by selected user
-  const filteredCommunityCatches = selectedUserFilter === "all"
-    ? communityCatches
-    : communityCatches.filter(c => c.userId === selectedUserFilter);
+  const filteredCommunityCatches =
+    selectedUserFilter === "all"
+      ? communityCatches
+      : communityCatches.filter((c) => c.userId === selectedUserFilter);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -354,7 +359,7 @@ function App() {
             <div className="text-8xl drop-shadow-2xl">🎣</div>
           </div>
           <h1 className="text-7xl font-black text-white mb-4 drop-shadow-lg">
-            Fishidy
+            Catchalog
           </h1>
           <p className="text-2xl text-white/90 mb-12 font-light">
             AI-Powered Fishing Diary
@@ -378,7 +383,7 @@ function App() {
           <div className="flex items-center gap-3">
             <span className="text-4xl">🎣</span>
             <h1 className="text-3xl font-black bg-gradient-to-r from-blue-600 to-cyan-500 dark:from-cyan-400 dark:to-blue-400 bg-clip-text text-transparent">
-              Fishidy
+              Catchalog
             </h1>
           </div>
 
@@ -604,12 +609,16 @@ function App() {
               </div>
               <div>
                 <h2 className="text-2xl font-bold text-gray-800 dark:text-white">
-                  {activeTab === "my-catches" ? "Your Catches" : "Community Catches"}
+                  {activeTab === "my-catches"
+                    ? "Your Catches"
+                    : "Community Catches"}
                 </h2>
                 <p className="text-gray-500 dark:text-gray-400 mt-1">
                   {activeTab === "my-catches"
                     ? `${catches.length} fish logged`
-                    : `${filteredCommunityCatches.length} catches${selectedUserFilter !== "all" ? " (filtered)" : ""}`}
+                    : `${filteredCommunityCatches.length} catches${
+                        selectedUserFilter !== "all" ? " (filtered)" : ""
+                      }`}
                 </p>
               </div>
             </div>
@@ -645,21 +654,31 @@ function App() {
               </div>
             )}
 
-            {(activeTab === "my-catches" ? catches : filteredCommunityCatches).length === 0 ? (
+            {(activeTab === "my-catches" ? catches : filteredCommunityCatches)
+              .length === 0 ? (
               <div className="bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm rounded-3xl p-16 text-center border-2 border-dashed border-gray-200 dark:border-slate-600">
                 <div className="text-7xl mb-4">🐟</div>
                 <p className="text-gray-600 dark:text-gray-300 text-xl font-semibold mb-2">
-                  {activeTab === "my-catches" ? "No catches yet" : selectedUserFilter !== "all" ? "No catches from this angler" : "No community catches yet"}
+                  {activeTab === "my-catches"
+                    ? "No catches yet"
+                    : selectedUserFilter !== "all"
+                    ? "No catches from this angler"
+                    : "No community catches yet"}
                 </p>
                 <p className="text-gray-400 dark:text-gray-500">
                   {activeTab === "my-catches"
                     ? "Upload your first fish photo to get started!"
-                    : selectedUserFilter !== "all" ? "Try selecting a different angler or clear the filter." : "Be the first to share a catch!"}
+                    : selectedUserFilter !== "all"
+                    ? "Try selecting a different angler or clear the filter."
+                    : "Be the first to share a catch!"}
                 </p>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {(activeTab === "my-catches" ? catches : filteredCommunityCatches).map((catch_) => (
+                {(activeTab === "my-catches"
+                  ? catches
+                  : filteredCommunityCatches
+                ).map((catch_) => (
                   <div
                     key={catch_.id}
                     onClick={() => {
@@ -702,7 +721,8 @@ function App() {
                           className="flex items-center gap-2 mb-4 pb-3 border-b border-gray-100 dark:border-slate-700 cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-700 -mx-2 px-2 py-1 rounded-lg transition-colors"
                           onClick={(e) => {
                             e.stopPropagation();
-                            if (catch_.userId) setSelectedUserFilter(catch_.userId);
+                            if (catch_.userId)
+                              setSelectedUserFilter(catch_.userId);
                           }}
                           title={`Filter by ${catch_.userDisplayName}`}
                         >
@@ -931,7 +951,9 @@ function App() {
                           />
                         ) : (
                           <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-cyan-400 flex items-center justify-center text-white font-bold">
-                            {selectedCatch.userDisplayName.charAt(0).toUpperCase()}
+                            {selectedCatch.userDisplayName
+                              .charAt(0)
+                              .toUpperCase()}
                           </div>
                         )}
                         <div>
